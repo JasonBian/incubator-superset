@@ -57,6 +57,7 @@ READ_ONLY_PERMISSION = {
 ALPHA_ONLY_PERMISSIONS = set([
     'muldelete',
     'all_datasource_access',
+    'dashboard_access'
 ])
 
 OBJECT_SPEC_PERMISSIONS = set([
@@ -227,5 +228,12 @@ def sync_role_definitions():
     create_missing_database_perms(view_menu_set)
     create_missing_metrics_perm(view_menu_set)
 
+    # add dashboards permissions
+    dashboards = [o for o in db.session.query(models.Dashboard).all()]
+    for dashboard in dashboards:
+        perm = dashboard.get_dashboard_title()
+        logging.info('dashboard:' + perm)
+        sm.add_permission_view_menu('dashboard_access', perm)
+        
     # commit role and view menu updates
     sm.get_session.commit()

@@ -137,6 +137,7 @@ class DashboardFilter(SupersetFilter):
     """List dashboards for which users have access to at least one slice"""
 
     def apply(self, query, func):  # noqa
+        logging.info('DashboardFilter invokedm query:' + str(query))
         if self.has_all_datasource_access():
             return query
         Slice = models.Slice  # noqa
@@ -148,12 +149,14 @@ class DashboardFilter(SupersetFilter):
             .query(Slice.id)
             .filter(Slice.perm.in_(datasource_perms))
         )
+        dashboard_perms = self.get_view_menus('dashboard_access')
         query = query.filter(
             Dash.id.in_(
                 db.session.query(Dash.id)
                 .distinct()
                 .join(Dash.slices)
                 .filter(Slice.id.in_(slice_ids_qry))
+                .filter(Dash.dashboard_title.in_(dashboard_perms))
             )
         )
         return query
@@ -469,6 +472,7 @@ class DashboardModelView(SupersetModelView, DeleteMixin):  # noqa
             obj.owners.append(g.user)
         utils.validate_json(obj.json_metadata)
         utils.validate_json(obj.position_json)
+        security.merge_perm(sm, 'dashboard_access', obj.dashboard_title)
         owners = [o for o in obj.owners]
         for slc in obj.slices:
             slc.owners = list(set(owners) | set(slc.owners))
@@ -1153,6 +1157,7 @@ class Superset(BaseSupersetView):
             dash = models.Dashboard(
                 dashboard_title=request.args.get('new_dashboard_name'),
                 owners=[g.user] if g.user else [])
+            security.merge_perm(sm, 'dashboard_access', dash.dashboard_title)
             flash(
                 "Dashboard [{}] just got created and slice [{}] was added "
                 "to it".format(
