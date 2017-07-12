@@ -314,7 +314,7 @@ class SupersetFilter(BaseFilter):
 
     def has_all_datasource_access(self):
         return (
-            self.has_role(['Admin']) or
+            self.has_role(['Admin']) or   # remove Alpha has_all_datasource_access
             self.has_perm('all_datasource_access', 'all_datasource_access'))
 
 

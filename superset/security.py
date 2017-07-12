@@ -57,7 +57,7 @@ READ_ONLY_PERMISSION = {
 ALPHA_ONLY_PERMISSIONS = set([
     'muldelete',
     'all_datasource_access',
-    'dashboard_access'
+    'dashboard_access' # add dashboard permissions for ALPHA Role
 ])
 
 OBJECT_SPEC_PERMISSIONS = set([

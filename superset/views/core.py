@@ -149,6 +149,7 @@ class DashboardFilter(SupersetFilter):
             .query(Slice.id)
             .filter(Slice.perm.in_(datasource_perms))
         )
+        # add dashboard permissions
         dashboard_perms = self.get_view_menus('dashboard_access')
         query = query.filter(
             Dash.id.in_(
