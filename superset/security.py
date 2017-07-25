@@ -232,8 +232,12 @@ def sync_role_definitions():
     dashboards = [o for o in db.session.query(models.Dashboard).all()]
     for dashboard in dashboards:
         perm = dashboard.get_dashboard_title()
-        logging.info('dashboard:' + perm)
-        sm.add_permission_view_menu('dashboard_access', perm)
+        exist_pv = sm.find_permission_view_menu('dashboard_access', perm)
+        if exist_pv is not None:
+            continue
+        else:
+            logging.info('dashboard:' + perm)
+            sm.add_permission_view_menu('dashboard_access', perm)
         
     # commit role and view menu updates
     sm.get_session.commit()
