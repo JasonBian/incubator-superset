@@ -123,7 +123,11 @@ export function toggleCheckbox(apiUrlPrefix, selector) {
  */
 export const fixDataTableBodyHeight = function ($tableDom, height) {
   const headHeight = $tableDom.find('.dataTables_scrollHead').height();
-  $tableDom.find('.dataTables_scrollBody').css('max-height', height - headHeight);
+  const filterHeight = $tableDom.find('.dataTables_filter').height() || 0;
+  const pageLengthHeight = $tableDom.find('.dataTables_length').height() || 0;
+  const paginationHeight = $tableDom.find('.dataTables_paginate').height() || 0;
+  const controlsHeight = (pageLengthHeight > filterHeight) ? pageLengthHeight : filterHeight;
+  $tableDom.find('.dataTables_scrollBody').css('max-height', height - headHeight - controlsHeight - paginationHeight);
 };
 
 export function d3format(format, number) {
@@ -229,14 +233,18 @@ export function initJQueryAjax() {
 }
 
 export function tryNumify(s) {
-  // Attempts casting to float, returns string when failing
-  try {
-    const parsed = parseFloat(s);
-    if (parsed) {
-      return parsed;
-    }
-  } catch (e) {
-    // pass
+  // Attempts casting to Number, returns string when failing
+  const n = Number(s);
+  if (isNaN(n)) {
+    return s;
   }
-  return s;
+  return n;
+}
+
+export function getParam(name) {
+  /* eslint no-useless-escape: 0 */
+  const formattedName = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+  const regex = new RegExp('[\\?&]' + formattedName + '=([^&#]*)');
+  const results = regex.exec(location.search);
+  return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
 }

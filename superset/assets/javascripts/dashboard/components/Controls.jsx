@@ -8,11 +8,21 @@ import RefreshIntervalModal from './RefreshIntervalModal';
 import SaveModal from './SaveModal';
 import CodeModal from './CodeModal';
 import SliceAdder from './SliceAdder';
+import { t } from '../../locales';
 
 const $ = window.$ = require('jquery');
 
 const propTypes = {
   dashboard: PropTypes.object.isRequired,
+  slices: PropTypes.array,
+  userId: PropTypes.string.isRequired,
+  addSlicesToDashboard: PropTypes.func,
+  onSave: PropTypes.func,
+  onChange: PropTypes.func,
+  readFilters: PropTypes.func,
+  renderSlices: PropTypes.func,
+  serialize: PropTypes.func,
+  startPeriodicRender: PropTypes.func,
 };
 
 class Controls extends React.PureComponent {
@@ -34,41 +44,44 @@ class Controls extends React.PureComponent {
     });
   }
   refresh() {
-    this.props.dashboard.sliceObjects.forEach((slice) => {
-      slice.render(true);
-    });
+    // Force refresh all slices
+    this.props.renderSlices(true);
   }
   changeCss(css) {
     this.setState({ css });
-    this.props.dashboard.onChange();
+    this.props.onChange();
   }
   render() {
-    const dashboard = this.props.dashboard;
-    const emailBody = `Checkout this dashboard: ${window.location.href}`;
+    const { dashboard, userId,
+      addSlicesToDashboard, startPeriodicRender, readFilters,
+      serialize, onSave } = this.props;
+    const emailBody = t('Checkout this dashboard: %s', window.location.href);
     const emailLink = 'mailto:?Subject=Superset%20Dashboard%20'
       + `${dashboard.dashboard_title}&Body=${emailBody}`;
     return (
       <ButtonGroup>
         <Button
-          tooltip="Force refresh the whole dashboard"
+          tooltip={t('Force refresh the whole dashboard')}
           onClick={this.refresh.bind(this)}
         >
           <i className="fa fa-refresh" />
         </Button>
         <SliceAdder
           dashboard={dashboard}
+          addSlicesToDashboard={addSlicesToDashboard}
+          userId={userId}
           triggerNode={
             <i className="fa fa-plus" />
           }
         />
         <RefreshIntervalModal
-          onChange={refreshInterval => dashboard.startPeriodicRender(refreshInterval * 1000)}
+          onChange={refreshInterval => startPeriodicRender(refreshInterval * 1000)}
           triggerNode={
             <i className="fa fa-clock-o" />
           }
         />
         <CodeModal
-          codeCallback={dashboard.readFilters.bind(dashboard)}
+          codeCallback={readFilters}
           triggerNode={<i className="fa fa-filter" />}
         />
         <CssEditor
@@ -90,12 +103,15 @@ class Controls extends React.PureComponent {
           onClick={() => {
             window.location = `/dashboardmodelview/edit/${dashboard.id}`;
           }}
-          tooltip="Edit this dashboard's properties"
+          tooltip={t('Edit this dashboard\'s properties')}
         >
           <i className="fa fa-edit" />
         </Button>
         <SaveModal
           dashboard={dashboard}
+          readFilters={readFilters}
+          serialize={serialize}
+          onSave={onSave}
           css={this.state.css}
           triggerNode={
             <Button disabled={!dashboard.dash_save_perm}>

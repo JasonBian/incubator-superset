@@ -4,41 +4,38 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from copy import copy, deepcopy
+from datetime import date, datetime
 import functools
 import json
 import logging
-import numpy
 import pickle
 import textwrap
-from future.standard_library import install_aliases
-from copy import copy
-from datetime import datetime, date
-
-import pandas as pd
-import sqlalchemy as sqla
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import subqueryload
 
 from flask import escape, g, Markup, request
 from flask_appbuilder import Model
 from flask_appbuilder.models.decorators import renders
-
+from future.standard_library import install_aliases
+import numpy
+import pandas as pd
+import sqlalchemy as sqla
 from sqlalchemy import (
-    Column, Integer, String, ForeignKey, Text, Boolean,
-    DateTime, Date, Table,
-    create_engine, MetaData, select
+    Boolean, Column, create_engine, Date, DateTime, ForeignKey, Integer,
+    MetaData, select, String, Table, Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.engine import url
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.orm import relationship, subqueryload
 from sqlalchemy.orm.session import make_transient
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import text
 from sqlalchemy.sql.expression import TextAsFrom
 from sqlalchemy_utils import EncryptedType
 
-from superset import app, db, db_engine_specs, utils, sm
+from superset import app, db, db_engine_specs, sm, utils
 from superset.connectors.connector_registry import ConnectorRegistry
-from superset.viz import viz_types
 from superset.models.helpers import AuditMixinNullable, ImportMixin, set_perm
+from superset.viz import viz_types
 install_aliases()
 from urllib import parse  # noqa
 
@@ -46,6 +43,7 @@ config = app.config
 stats_logger = config.get('STATS_LOGGER')
 metadata = Model.metadata  # pylint: disable=no-member
 
+PASSWORD_MASK = 'X' * 10
 
 def set_related_perm(mapper, connection, target):  # noqa
     src_class = target.cls_model
@@ -86,8 +84,7 @@ class CssTemplate(Model, AuditMixinNullable):
 slice_user = Table('slice_user', metadata,
                    Column('id', Integer, primary_key=True),
                    Column('user_id', Integer, ForeignKey('ab_user.id')),
-                   Column('slice_id', Integer, ForeignKey('slices.id'))
-                   )
+                   Column('slice_id', Integer, ForeignKey('slices.id')))
 
 
 class Slice(Model, AuditMixinNullable, ImportMixin):
@@ -120,6 +117,17 @@ class Slice(Model, AuditMixinNullable, ImportMixin):
     @property
     def datasource(self):
         return self.get_datasource
+
+    def clone(self):
+        return Slice(
+            slice_name=self.slice_name,
+            datasource_id=self.datasource_id,
+            datasource_type=self.datasource_type,
+            datasource_name=self.datasource_name,
+            viz_type=self.viz_type,
+            params=self.params,
+            description=self.description,
+            cache_timeout=self.cache_timeout)
 
     @datasource.getter
     @utils.memoized
@@ -182,11 +190,16 @@ class Slice(Model, AuditMixinNullable, ImportMixin):
 
     @property
     def form_data(self):
-        form_data = json.loads(self.params)
+        form_data = {}
+        try:
+            form_data = json.loads(self.params)
+        except Exception as e:
+            logging.error("Malformed json in slice's params")
+            logging.exception(e)
         form_data.update({
             'slice_id': self.id,
             'viz_type': self.viz_type,
-            'datasource': str(self.datasource_id) + '__' + self.datasource_type
+            'datasource': str(self.datasource_id) + '__' + self.datasource_type,
         })
         if self.cache_timeout:
             form_data['cache_timeout'] = self.cache_timeout
@@ -196,19 +209,19 @@ class Slice(Model, AuditMixinNullable, ImportMixin):
     def slice_url(self):
         """Defines the url to access the slice"""
         return (
-            "/superset/explore/{obj.datasource_type}/"
-            "{obj.datasource_id}/?form_data={params}".format(
+            '/superset/explore/{obj.datasource_type}/'
+            '{obj.datasource_id}/?form_data={params}'.format(
                 obj=self, params=parse.quote(json.dumps(self.form_data))))
 
     @property
     def slice_id_url(self):
         return (
-            "/superset/{slc.datasource_type}/{slc.datasource_id}/{slc.id}/"
+            '/superset/{slc.datasource_type}/{slc.datasource_id}/{slc.id}/'
         ).format(slc=self)
 
     @property
     def edit_url(self):
-        return "/slicemodelview/edit/{}".format(self.id)
+        return '/slicemodelview/edit/{}'.format(self.id)
 
     @property
     def slice_link(self):
@@ -216,21 +229,18 @@ class Slice(Model, AuditMixinNullable, ImportMixin):
         name = escape(self.slice_name)
         return Markup('<a href="{url}">{name}</a>'.format(**locals()))
 
-    def get_viz(self, url_params_multidict=None):
+    def get_viz(self):
         """Creates :py:class:viz.BaseViz object from the url_params_multidict.
 
-        :param werkzeug.datastructures.MultiDict url_params_multidict:
-            Contains the visualization params, they override the self.params
-            stored in the database
         :return: object of the 'viz_type' type that is taken from the
             url_params_multidict or self.params.
         :rtype: :py:class:viz.BaseViz
         """
         slice_params = json.loads(self.params)
         slice_params['slice_id'] = self.id
-        slice_params['json'] = "false"
+        slice_params['json'] = 'false'
         slice_params['slice_name'] = self.slice_name
-        slice_params['viz_type'] = self.viz_type if self.viz_type else "table"
+        slice_params['viz_type'] = self.viz_type if self.viz_type else 'table'
 
         return viz_types[slice_params.get('viz_type')](
             self.datasource,
@@ -288,7 +298,7 @@ dashboard_user = Table(
     'dashboard_user', metadata,
     Column('id', Integer, primary_key=True),
     Column('user_id', Integer, ForeignKey('ab_user.id')),
-    Column('dashboard_id', Integer, ForeignKey('dashboards.id'))
+    Column('dashboard_id', Integer, ForeignKey('dashboards.id')),
 )
 
 
@@ -320,12 +330,20 @@ class Dashboard(Model, AuditMixinNullable, ImportMixin):
     @property
     def table_names(self):
         # pylint: disable=no-member
-        return ", ".join(
-            {"{}".format(s.datasource.full_name) for s in self.slices})
+        return ', '.join(
+            {'{}'.format(s.datasource.full_name) for s in self.slices})
 
     @property
     def url(self):
-        return "/superset/dashboard/{}/".format(self.slug or self.id)
+        if self.json_metadata:
+            # add default_filters to the preselect_filters of dashboard
+            json_metadata = json.loads(self.json_metadata)
+            default_filters = json_metadata.get('default_filters')
+            if default_filters:
+                filters = parse.quote(default_filters.encode('utf8'))
+                return '/superset/dashboard/{}/?preselect_filters={}'.format(
+                    self.slug or self.id, filters)
+        return '/superset/dashboard/{}/'.format(self.slug or self.id)
 
     @property
     def datasources(self):
@@ -414,6 +432,7 @@ class Dashboard(Model, AuditMixinNullable, ImportMixin):
         slices = copy(dashboard_to_import.slices)
         old_to_new_slc_id_dict = {}
         new_filter_immune_slices = []
+        new_timed_refresh_immune_slices = []
         new_expanded_slices = {}
         i_params_dict = dashboard_to_import.params_dict
         for slc in slices:
@@ -427,6 +446,10 @@ class Dashboard(Model, AuditMixinNullable, ImportMixin):
             if ('filter_immune_slices' in i_params_dict and
                     old_slc_id_str in i_params_dict['filter_immune_slices']):
                 new_filter_immune_slices.append(new_slc_id_str)
+            if ('timed_refresh_immune_slices' in i_params_dict and
+                    old_slc_id_str in
+                    i_params_dict['timed_refresh_immune_slices']):
+                new_timed_refresh_immune_slices.append(new_slc_id_str)
             if ('expanded_slices' in i_params_dict and
                     old_slc_id_str in i_params_dict['expanded_slices']):
                 new_expanded_slices[new_slc_id_str] = (
@@ -449,6 +472,9 @@ class Dashboard(Model, AuditMixinNullable, ImportMixin):
         if new_filter_immune_slices:
             dashboard_to_import.alter_params(
                 filter_immune_slices=new_filter_immune_slices)
+        if new_timed_refresh_immune_slices:
+            dashboard_to_import.alter_params(
+                timed_refresh_immune_slices=new_timed_refresh_immune_slices)
 
         new_slices = session.query(Slice).filter(
             Slice.id.in_(old_to_new_slc_id_dict.values())).all()
@@ -515,7 +541,7 @@ class Database(Model, AuditMixinNullable):
     """An ORM object that stores Database related information"""
 
     __tablename__ = 'dbs'
-    type = "table"
+    type = 'table'
 
     id = Column(Integer, primary_key=True)
     verbose_name = Column(String(250), unique=True)
@@ -538,6 +564,8 @@ class Database(Model, AuditMixinNullable):
     }
     """))
     perm = Column(String(1000))
+    custom_password_store = config.get('SQLALCHEMY_CUSTOM_PASSWORD_STORE')
+    impersonate_user = Column(Boolean, default=False)
 
     def __repr__(self):
         return self.verbose_name if self.verbose_name else self.database_name
@@ -555,23 +583,76 @@ class Database(Model, AuditMixinNullable):
         url = make_url(self.sqlalchemy_uri_decrypted)
         return url.get_backend_name()
 
+    @classmethod
+    def get_password_masked_url_from_uri(cls, uri):
+        url = make_url(uri)
+        return cls.get_password_masked_url(url)
+
+    @classmethod
+    def get_password_masked_url(cls, url):
+        url_copy = deepcopy(url)
+        if url_copy.password is not None and url_copy.password != PASSWORD_MASK:
+            url_copy.password = PASSWORD_MASK
+        return url_copy
+
     def set_sqlalchemy_uri(self, uri):
-        password_mask = "X" * 10
-        conn = sqla.engine.url.make_url(uri)
-        if conn.password != password_mask:
+        conn = sqla.engine.url.make_url(uri.strip())
+        if conn.password != PASSWORD_MASK and not self.custom_password_store:
             # do not over-write the password with the password mask
             self.password = conn.password
-        conn.password = password_mask if conn.password else None
+        conn.password = PASSWORD_MASK if conn.password else None
         self.sqlalchemy_uri = str(conn)  # hides the password
 
-    def get_sqla_engine(self, schema=None, nullpool=False):
+    def get_effective_user(self, url, user_name=None):
+        """
+        Get the effective user, especially during impersonation.
+        :param url: SQL Alchemy URL object
+        :param user_name: Default username
+        :return: The effective username
+        """
+        effective_username = None
+        if self.impersonate_user:
+            effective_username = url.username
+            if user_name:
+                effective_username = user_name
+            elif (
+                hasattr(g, 'user') and hasattr(g.user, 'username') and
+                g.user.username is not None
+            ):
+                effective_username = g.user.username
+        return effective_username
+
+    def get_sqla_engine(self, schema=None, nullpool=False, user_name=None):
         extra = self.get_extra()
-        uri = make_url(self.sqlalchemy_uri_decrypted)
+        url = make_url(self.sqlalchemy_uri_decrypted)
+        url = self.db_engine_spec.adjust_database_uri(url, schema)
+        effective_username = self.get_effective_user(url, user_name)
+        # If using MySQL or Presto for example, will set url.username
+        # If using Hive, will not do anything yet since that relies on a
+        # configuration parameter instead.
+        self.db_engine_spec.modify_url_for_impersonation(
+            url,
+            self.impersonate_user,
+            effective_username)
+
+        masked_url = self.get_password_masked_url(url)
+        logging.info('Database.get_sqla_engine(). Masked URL: {0}'.format(masked_url))
+
         params = extra.get('engine_params', {})
         if nullpool:
             params['poolclass'] = NullPool
-        uri = self.db_engine_spec.adjust_database_uri(uri, schema)
-        return create_engine(uri, **params)
+
+        # If using Hive, this will set hive.server2.proxy.user=$effective_username
+        configuration = {}
+        configuration.update(
+            self.db_engine_spec.get_configuration_for_impersonation(
+                str(url),
+                self.impersonate_user,
+                effective_username))
+        if configuration:
+            params['connect_args'] = {'configuration': configuration}
+
+        return create_engine(url, **params)
 
     def get_reserved_words(self):
         return self.get_sqla_engine().dialect.preparer.reserved_words
@@ -598,7 +679,7 @@ class Database(Model, AuditMixinNullable):
 
     def compile_sqla_query(self, qry, schema=None):
         eng = self.get_sqla_engine(schema=schema)
-        compiled = qry.compile(eng, compile_kwargs={"literal_binds": True})
+        compiled = qry.compile(eng, compile_kwargs={'literal_binds': True})
         return '{}'.format(compiled)
 
     def select_star(
@@ -614,7 +695,7 @@ class Database(Model, AuditMixinNullable):
             select('*')
             .select_from(
                 TextAsFrom(text(sql), ['*'])
-                .alias('inner_qry')
+                .alias('inner_qry'),
             ).limit(limit)
         )
         return self.compile_sqla_query(qry)
@@ -631,7 +712,7 @@ class Database(Model, AuditMixinNullable):
         if not schema:
             tables_dict = self.db_engine_spec.fetch_result_sets(
                 self, 'table', force=force)
-            return tables_dict.get("", [])
+            return tables_dict.get('', [])
         return sorted(
             self.db_engine_spec.get_table_names(schema, self.inspector))
 
@@ -639,7 +720,7 @@ class Database(Model, AuditMixinNullable):
         if not schema:
             views_dict = self.db_engine_spec.fetch_result_sets(
                 self, 'view', force=force)
-            return views_dict.get("", [])
+            return views_dict.get('', [])
         views = []
         try:
             views = self.inspector.get_view_names(schema)
@@ -648,12 +729,16 @@ class Database(Model, AuditMixinNullable):
         return views
 
     def all_schema_names(self):
-        return sorted(self.inspector.get_schema_names())
+        return sorted(self.db_engine_spec.get_schema_names(self.inspector))
 
     @property
     def db_engine_spec(self):
         return db_engine_specs.engines.get(
             self.backend, db_engine_specs.BaseEngineSpec)
+
+    @classmethod
+    def get_db_engine_spec_for_backend(cls, backend):
+        return db_engine_specs.engines.get(backend, db_engine_specs.BaseEngineSpec)
 
     def grains(self):
         """Defines time granularity database-specific expressions.
@@ -702,7 +787,10 @@ class Database(Model, AuditMixinNullable):
     @property
     def sqlalchemy_uri_decrypted(self):
         conn = sqla.engine.url.make_url(self.sqlalchemy_uri)
-        conn.password = self.password
+        if self.custom_password_store:
+            conn.password = self.custom_password_store(conn)
+        else:
+            conn.password = self.password
         return str(conn)
 
     @property
@@ -711,7 +799,17 @@ class Database(Model, AuditMixinNullable):
 
     def get_perm(self):
         return (
-            "[{obj.database_name}].(id:{obj.id})").format(obj=self)
+            '[{obj.database_name}].(id:{obj.id})').format(obj=self)
+
+    def has_table(self, table):
+        engine = self.get_sqla_engine()
+        return engine.has_table(
+            table.table_name, table.schema or None)
+
+    def get_dialect(self):
+        sqla_url = url.make_url(self.sqlalchemy_uri_decrypted)
+        return sqla_url.get_dialect()()
+
 
 sqla.event.listen(Database, 'after_insert', set_perm)
 sqla.event.listen(Database, 'after_update', set_perm)
@@ -748,24 +846,26 @@ class Log(Model):
             post_data = request.form or {}
             d.update(post_data)
             d.update(kwargs)
-            slice_id = d.get('slice_id', 0)
+            slice_id = d.get('slice_id')
+
             try:
-                slice_id = int(slice_id) if slice_id else 0
-            except ValueError:
+                slice_id = int(
+                    slice_id or json.loads(d.get('form_data')).get('slice_id'))
+            except (ValueError, TypeError):
                 slice_id = 0
-            params = ""
+
+            params = ''
             try:
                 params = json.dumps(d)
-            except:
+            except Exception:
                 pass
             stats_logger.incr(f.__name__)
             value = f(*args, **kwargs)
-
             sesh = db.session()
             log = cls(
                 action=f.__name__,
                 json=params,
-                dashboard_id=d.get('dashboard_id') or None,
+                dashboard_id=d.get('dashboard_id'),
                 slice_id=slice_id,
                 duration_ms=(
                     datetime.now() - start_dttm).total_seconds() * 1000,
@@ -851,6 +951,6 @@ class DatasourceAccessRequest(Model, AuditMixinNullable):
             )
             href = '<a href="{}">Extend {} Role</a>'.format(url, r.name)
             if r.name in self.ROLES_BLACKLIST:
-                href = "{} Role".format(r.name)
+                href = '{} Role'.format(r.name)
             action_list = action_list + '<li>' + href + '</li>'
         return '<ul>' + action_list + '</ul>'
