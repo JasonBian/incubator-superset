@@ -158,14 +158,9 @@ class DashboardFilter(SupersetFilter):
                 db.session.query(Dash.id)
                 .distinct()
                 .join(Dash.slices)
-<<<<<<< .merge_file_M5I5Wb
                 .filter(Slice.id.in_(slice_ids_qry))
                 .filter(Dash.dashboard_title.in_(dashboard_perms))
             )
-=======
-                .filter(Slice.id.in_(slice_ids_qry)),
-            ),
->>>>>>> .merge_file_ZmhOVb
         )
         return query
 
